@@ -1,0 +1,4 @@
+include README.md QUICKSTART.md CHANGELOG.md PUBLISH.md LICENSE CITATION.cff
+recursive-include texelator/cuda *.cu *.cpp
+recursive-include docs *.md
+recursive-include paper *.pdf

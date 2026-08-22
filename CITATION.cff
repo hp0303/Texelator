@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+title: "Texelator: Repurposing GPU Texture Hardware for Low-Bit Language Model Inference"
+message: "If you use Texelator in research, please cite the paper."
+type: software
+authors:
+  - family-names: Park
+    given-names: Hyun
+version: 0.1.0
+license: MIT
+

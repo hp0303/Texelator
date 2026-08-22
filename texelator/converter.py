@@ -12,7 +12,7 @@ from .artifacts import environment_snapshot, sha256_file, validate_encoded, writ
 from .encoder import encode_linear_e3, load_palette
 from .hardware import ensure_hardware
 from .modeling import input_device, load_model, load_tokenizer
-from .store import ModelRecord, STATE_HOME
+from .store import STATE_HOME, ModelRecord
 
 
 def _calibration_ids(record: ModelRecord, tokens: int, calibration_file: str | None) -> torch.Tensor:

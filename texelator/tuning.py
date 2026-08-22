@@ -9,7 +9,6 @@ import torch
 from .artifacts import sha256_file, write_json
 from .runtime import extension, free, pack_entry
 
-
 CANDIDATES = (1, 2, 3, 4, 6, 8)
 
 

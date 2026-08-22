@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Iterable
 
-import torch.nn as nn
-
+from torch import nn
 
 DEFAULT_SUFFIXES = (
     "q_proj", "k_proj", "v_proj", "o_proj",

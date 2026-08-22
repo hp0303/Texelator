@@ -6,7 +6,6 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 STATE_HOME = Path(
     os.environ.get("TEXELATOR_HOME", Path.home() / ".cache" / "texelator")
 ).expanduser().resolve()
@@ -45,7 +44,7 @@ def _load() -> dict[str, dict]:
         return {}
     value = json.loads(REGISTRY_PATH.read_text())
     if not isinstance(value, dict):
-        raise RuntimeError(f"invalid Texelator registry: {REGISTRY_PATH}")
+        raise TypeError(f"invalid Texelator registry: {REGISTRY_PATH}")
     return value
 
 
@@ -142,4 +141,3 @@ def artifact_path(value: str) -> Path:
     if (managed / "texelator.json").exists():
         return managed.resolve()
     raise RuntimeError(f"Texelator artifact not found: {value}")
-

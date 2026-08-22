@@ -6,11 +6,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.cpp_extension import load
 
 from .adapters import resolve_parent
-
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 _EXTENSION = None

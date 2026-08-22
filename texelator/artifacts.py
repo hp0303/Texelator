@@ -7,8 +7,8 @@ import os
 import platform
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import torch
 

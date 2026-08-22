@@ -23,7 +23,7 @@ Ninja, and a CUDA toolkit containing `nvcc` are required. On Ubuntu/WSL, install
 build appropriate for your GPU before running:
 
 ```bash
-git clone https://github.com/OWNER/texelator.git
+git clone https://github.com/hp0303/texelator.git
 cd texelator
 bash scripts/install.sh
 source .venv/bin/activate

@@ -23,7 +23,7 @@ Ninja, and a CUDA toolkit containing `nvcc` are required. On Ubuntu/WSL, install
 build appropriate for your GPU before running:
 
 ```bash
-git clone https://github.com/hp0303/texelator.git
+git clone https://github.com/hp0303/Texelator.git
 cd texelator
 bash scripts/install.sh
 source .venv/bin/activate
@@ -155,6 +155,17 @@ The current manuscript is included as [paper/Texelator.pdf](paper/Texelator.pdf)
 Performance claims in the paper use an audited native-vLLM harness; the simple
 Transformers CLI in this repository is intended for accessibility, not for reproducing
 the paper's comparison tables.
+
+The compact CSVs behind the primary paper tables and plots are available in
+[`results/paper`](results/paper). They include protocol and environment metadata but
+exclude model weights, prompts, and raw traces. Regenerate the public figures with:
+
+```bash
+python -m pip install -e '.[paper]'
+python scripts/plot_paper_results.py
+```
+
+This command reproduces figures from frozen measurements; it does not rerun inference.
 
 ## License
 

@@ -2,3 +2,5 @@ include README.md QUICKSTART.md CHANGELOG.md PUBLISH.md LICENSE CITATION.cff
 recursive-include texelator/cuda *.cu *.cpp
 recursive-include docs *.md
 recursive-include paper *.pdf
+recursive-include results/paper *.csv *.json *.md
+include scripts/plot_paper_results.py

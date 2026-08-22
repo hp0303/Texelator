@@ -1,0 +1,30 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.so
+*.o
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Never commit downloaded or converted model data.
+models/
+artifacts/
+weights/
+*.safetensors
+*.bin
+*.bc4
+*.scales.f32
+*.pt
+*.pth
+*.gguf
+*.tar.gz
+
+# Local state and generated output.
+runs/
+logs/
+profiles/local/
+paper_figures/
+.env

@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.cu linguist-language=C++
+*.bc4 binary
+*.pdf binary
+

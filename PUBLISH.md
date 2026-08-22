@@ -18,8 +18,7 @@ git commit -m "Initial public Texelator runtime"
 gh repo create texelator --public --source=. --remote=origin --push
 ```
 
-Before pushing, replace `OWNER` in the README clone URL and add the arXiv URL to
-`CITATION.cff` after the identifier is assigned.
+Add the arXiv URL to `CITATION.cff` after the identifier is assigned.
 
 Do not attach original model weights or converted BC4 artifacts to the Git repository.
 If preconverted models are distributed later, place them in a separate Hugging Face

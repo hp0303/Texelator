@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "microbenchmark": {
+    "gpu": "NVIDIA GeForce RTX 4060",
+    "compute_capability": "8.9",
+    "workload": "24 rotating Qwen2.5-0.5B down projections",
+    "logical_weights_per_sweep": 104595456,
+    "launches_per_sweep": 24,
+    "warmup_sweeps": 30,
+    "measured_sweeps": 300,
+    "independent_runs": 5,
+    "metric": "representation bytes divided by GPU-event latency; not measured DRAM bandwidth",
+    "bc4_representation_bytes": 52383744,
+    "marlin_representation_bytes": 53932032
+  },
+  "end_to_end": {
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+    "compute_capability": "8.9",
+    "environment": "WSL2",
+    "cuda": "12.9",
+    "torch": "2.11.0+cu129",
+    "vllm": "0.23.0",
+    "batch_size": 1,
+    "warmup_decode_tokens": 32,
+    "measured_decode_tokens": 256,
+    "independent_runs": 5,
+    "contexts": [128, 512, 2048, 4096, 8192],
+    "gptq": "llm-compressor GPTQ-W4A16-G128 through vLLM compressed-tensors Marlin",
+    "awq": "llm-compressor AWQ-W4A16-G128 through vLLM compressed-tensors Marlin"
+  },
+  "quality_reference": "symmetric RTN W4A16 group-128; 0.5B/1.5B original Marlin pack/kernel, 3B dense reconstruction of identical quantized weights",
+  "palette": {
+    "measurement": "independently measured on RTX 4060 and RTX 4080 SUPER",
+    "sha256": "34670bd1c521c26b14ea88ed6f2d8f16c55720f20915909ac621dcabe0f3ed47",
+    "identical_on_both_ada_gpus": true
+  }
+}

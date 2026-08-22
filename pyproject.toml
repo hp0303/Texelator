@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.9"]
+paper = ["matplotlib>=3.8", "scienceplots>=2.1"]
 
 [project.scripts]
 texelator = "texelator.cli:main"

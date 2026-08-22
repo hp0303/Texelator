@@ -1,0 +1,5 @@
+method,latency_ms,representation_bytes,physical_weight_throughput_gb_s
+Marlin INT4 G128,0.3266560137,53932032,165.1034
+BC4 tex2D,0.6901760000,52383744,75.8991
+BC4 tex2Dgather,0.3737920000,52383744,140.1414
+BC4 tex2Dgather ILP,0.2826240000,52383744,185.3478

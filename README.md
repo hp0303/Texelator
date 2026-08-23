@@ -1,5 +1,5 @@
 # Texelator
-**Repurposing GPU texture hardware for low-bit LLM inference.**
+**Repurposing GPU texture unit for low-bit LLM inference.**
 
 Up to **1.37× faster decoding** on RTX 4080 SUPER, with quality competitive with activation-aware INT4 at the same compression ratio.
 
@@ -10,8 +10,6 @@ Texelator is an experimental inference runtime that stores supported language-mo
 linear weights as signed BC4 blocks and reconstructs them with the GPU Texture Unit.
 It does **not** change the Transformer architecture. The source model remains a normal
 Hugging Face checkpoint; conversion creates a separate, linked BC4 artifact.
-
-This project is not affiliated with the unrelated Texelator Core tool for Autodesk Maya.
 
 The public repository is for trying the runtime. It intentionally excludes model
 weights, Hugging Face caches, research benchmark suites, raw profiler traces, and the

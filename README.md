@@ -3,7 +3,7 @@
 
 Up to **1.37× faster decoding** on RTX 4080 SUPER, with quality competitive with activation-aware INT4 at the same compression ratio.
 
-![Texelator benchmark](result/paper/tokenpss.png)
+![Texelator benchmark](results/paper/tokenpss.png)
 
 
 Texelator is an experimental inference runtime that stores supported language-model

@@ -1,4 +1,10 @@
 # Texelator
+**Repurposing GPU texture hardware for low-bit LLM inference.**
+
+Up to **1.37× faster decoding** on RTX 4080 SUPER, with quality competitive with activation-aware INT4 at the same compression ratio.
+
+![Texelator benchmark](result/paper/tokenpss.png)
+
 
 Texelator is an experimental inference runtime that stores supported language-model
 linear weights as signed BC4 blocks and reconstructs them with the GPU Texture Unit.

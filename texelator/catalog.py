@@ -10,7 +10,6 @@ import torch
 
 from .store import STATE_HOME, safe_name
 
-
 ARTIFACT_REGISTRY = STATE_HOME / "artifacts.json"
 MODEL_CATALOG = {
     "qwen3.8:27b": {
@@ -37,7 +36,7 @@ def _load_registry() -> dict[str, dict]:
         return {}
     value = json.loads(ARTIFACT_REGISTRY.read_text())
     if not isinstance(value, dict):
-        raise RuntimeError(f"invalid artifact registry: {ARTIFACT_REGISTRY}")
+        raise TypeError(f"invalid artifact registry: {ARTIFACT_REGISTRY}")
     return value
 
 

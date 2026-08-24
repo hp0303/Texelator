@@ -10,7 +10,6 @@ from safetensors.torch import save_file
 
 from .artifacts import sha256_file, validate_encoded, write_json
 
-
 TEXT_PREFIX = "model.language_model."
 TOKENIZER_FILES = (
     "config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json",
@@ -28,7 +27,7 @@ class CheckpointIndex:
             self.weight_map = dict(json.loads(index.read_text()).get("weight_map", {}))
         elif single.is_file():
             with safe_open(str(single), framework="pt", device="cpu") as handle:
-                self.weight_map = {name: single.name for name in handle.keys()}
+                self.weight_map = {name: single.name for name in handle}
         else:
             raise RuntimeError("standalone packaging requires a safetensors source checkpoint")
         if not self.weight_map:

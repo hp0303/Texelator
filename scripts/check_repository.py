@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_PARTS = {".git", ".venv", "__pycache__", "build", "dist"}
+SKIP_PARTS = {".git", ".venv", ".ruff_cache", "__pycache__", "build", "dist"}
 BLOCKED_SUFFIXES = {
     ".safetensors", ".bc4", ".f32", ".pt", ".pth", ".gguf", ".bin", ".tar", ".gz"
 }

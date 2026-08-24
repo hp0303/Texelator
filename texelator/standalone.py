@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 
 import torch
-import torch.nn.functional as functional
 from accelerate import init_empty_weights
 from safetensors import safe_open
 from torch import nn
+from torch.nn import functional
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 
 from .artifacts import sha256_file

@@ -195,7 +195,7 @@ def _artifact_source(artifact: Path) -> ModelRecord:
 
 
 def command_run(args) -> None:
-    from .runtime import free, install
+    from .runtime import install
     from .standalone import is_standalone_artifact, load_standalone_qwen38
     from .tuning import selected_lookahead
 

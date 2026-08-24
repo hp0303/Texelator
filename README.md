@@ -11,6 +11,13 @@ hardware. It does not change the Transformer architecture.
 [Qwen3.8-27B model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4) ·
 [Latest release](https://github.com/hp0303/Texelator/releases/latest)
 
+> **Early alpha — bug reports are very welcome.** Texelator is still experimental,
+> and behavior may vary across GPUs, drivers, CUDA versions, and model architectures.
+> If something fails or produces unexpected output, please
+> [open an issue](https://github.com/hp0303/Texelator/issues) with the full command,
+> complete error log, GPU model, driver version, CUDA Toolkit version, OS, and model ID.
+> Please do not silently skip a failed setup, benchmark, or correctness stage.
+
 ![Decode throughput on RTX 4080 SUPER](research/results/paper/tokenpss.png)
 
 ## Install and chat

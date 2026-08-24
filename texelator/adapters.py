@@ -88,6 +88,10 @@ def discover_linears(
 
 
 def resolve_parent(model: nn.Module, module_name: str) -> tuple[nn.Module, str]:
+    if "." not in module_name:
+        if not hasattr(model, module_name):
+            raise RuntimeError(f"model module does not exist: {module_name}")
+        return model, module_name
     parent_name, child = module_name.rsplit(".", 1)
     return model.get_submodule(parent_name), child
 
@@ -97,4 +101,3 @@ def model_slug(model_id: str, revision: str | None = None) -> str:
     if revision and revision not in ("main", "default"):
         base += "--" + re.sub(r"[^A-Za-z0-9_.-]+", "-", revision)[:24]
     return base
-

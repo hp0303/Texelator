@@ -16,8 +16,8 @@ Regenerate the public figures with:
 
 ```bash
 python -m pip install -e '.[paper]'
-python scripts/plot_paper_results.py
+python research/scripts/plot_paper_results.py
 ```
 
-The plotting command writes PNG and PDF files to `paper_figures/`. These CSVs
+The plotting command writes PNG and PDF files to `research/paper_figures/`. These CSVs
 reproduce the published plots and tables; they do not rerun model inference.

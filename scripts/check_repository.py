@@ -11,7 +11,7 @@ BLOCKED_SUFFIXES = {
     ".safetensors", ".bc4", ".f32", ".pt", ".pth", ".gguf", ".bin", ".tar", ".gz"
 }
 MAX_BYTES = 5 * 1024 * 1024
-ALLOWED_LARGE = {Path("paper/Texelator.pdf")}
+ALLOWED_LARGE = {Path("research/paper/Texelator.pdf")}
 PERSONAL_MARKERS = (
     b"/home/" + b"hp/",
     b"/root/" + b".cache/",

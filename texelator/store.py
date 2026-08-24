@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-STATE_HOME = Path(
-    os.environ.get("TEXELATOR_HOME", Path.home() / ".cache" / "texelator")
-).expanduser().resolve()
+if sys.platform == "win32":
+    _default_state = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Texelator"
+else:
+    _default_state = Path.home() / ".cache" / "texelator"
+STATE_HOME = Path(os.environ.get("TEXELATOR_HOME", _default_state)).expanduser().resolve()
 REGISTRY_PATH = STATE_HOME / "models.json"
 
 MODEL_ALIASES = {

@@ -24,8 +24,8 @@ def load_tokenizer(record: ModelRecord):
 
 
 def input_device(model) -> torch.device:
-    device = model.get_input_embeddings().weight.device
+    embedding = model.get_input_embeddings()
+    device = getattr(embedding, "output_device", embedding.weight.device)
     if device.type == "meta":
         raise RuntimeError("input embedding remains on a meta device")
     return device
-

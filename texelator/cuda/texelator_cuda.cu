@@ -1,8 +1,11 @@
-#include <torch/extension.h>
+#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cstdint>
+#include <vector>
 
 #define CUDA_CHECK(call) do { \
   cudaError_t error = (call); \
@@ -88,11 +91,11 @@ __global__ void texelator_bc4_kernel(cudaTextureObject_t texture, const __half *
     y[row] = __float2half(accumulator + (bias ? __half2float(bias[row]) : 0.f));
 }
 
-uint64_t texelator_pack_encoded(torch::Tensor blocks, torch::Tensor scales,
-                             c10::optional<torch::Tensor> bias) {
-  TORCH_CHECK(!blocks.is_cuda() && blocks.scalar_type() == torch::kUInt8 && blocks.is_contiguous(),
+uint64_t texelator_pack_encoded(at::Tensor blocks, at::Tensor scales,
+                             c10::optional<at::Tensor> bias) {
+  TORCH_CHECK(!blocks.is_cuda() && blocks.scalar_type() == at::kByte && blocks.is_contiguous(),
               "blocks must be contiguous CPU uint8");
-  TORCH_CHECK(!scales.is_cuda() && scales.scalar_type() == torch::kFloat32 && scales.is_contiguous(),
+  TORCH_CHECK(!scales.is_cuda() && scales.scalar_type() == at::kFloat && scales.is_contiguous(),
               "scales must be contiguous CPU float32");
   int M = scales.numel();
   TORCH_CHECK(M > 0 && blocks.numel() % (size_t(M) * 8) == 0, "invalid encoded size");
@@ -122,7 +125,7 @@ uint64_t texelator_pack_encoded(torch::Tensor blocks, torch::Tensor scales,
   CUDA_CHECK(cudaMemcpy(handle->scales, scales.data_ptr(), size_t(M) * 4, cudaMemcpyHostToDevice));
   if (bias.has_value() && bias->defined() && bias->numel()) {
     auto contiguous = bias->contiguous();
-    TORCH_CHECK(contiguous.is_cuda() && contiguous.scalar_type() == torch::kFloat16 && contiguous.numel() == M,
+    TORCH_CHECK(contiguous.is_cuda() && contiguous.scalar_type() == at::kHalf && contiguous.numel() == M,
                 "bias must be CUDA FP16 [M]");
     CUDA_CHECK(cudaMalloc(&handle->bias, size_t(M) * 2));
     CUDA_CHECK(cudaMemcpy(handle->bias, contiguous.data_ptr(), size_t(M) * 2, cudaMemcpyDeviceToDevice));
@@ -130,17 +133,17 @@ uint64_t texelator_pack_encoded(torch::Tensor blocks, torch::Tensor scales,
   return reinterpret_cast<uint64_t>(handle);
 }
 
-torch::Tensor texelator_linear(uint64_t value, torch::Tensor x) {
+at::Tensor texelator_linear(uint64_t value, at::Tensor x) {
   auto *handle = reinterpret_cast<Handle *>(value);
   TORCH_CHECK(handle, "null Texelator handle");
-  TORCH_CHECK(x.is_cuda() && x.scalar_type() == torch::kFloat16 && x.is_contiguous(),
+  TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kHalf && x.is_contiguous(),
               "input must be contiguous CUDA FP16");
   TORCH_CHECK(x.size(-1) == handle->K && x.get_device() == handle->device, "input shape/device mismatch");
   int tokens = x.numel() / handle->K;
   TORCH_CHECK(tokens <= 65535, "token grid exceeds CUDA grid.y limit");
   auto shape = x.sizes().vec();
   shape.back() = handle->M;
-  auto y = torch::empty(shape, x.options());
+  auto y = at::empty(shape, x.options());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(handle->device);
   dim3 grid((handle->M + 7) / 8, tokens);
 #define LAUNCH_K(KVALUE) texelator_bc4_kernel<KVALUE><<<grid, 256, 0, stream>>>(handle->texture, \
@@ -170,3 +173,60 @@ void texelator_set_lookahead(uint64_t value, int lookahead) {
 }
 
 void texelator_free(uint64_t value) { delete reinterpret_cast<Handle *>(value); }
+
+struct ProbeBlock { uint8_t bytes[8]; };
+
+__global__ void texelator_dump_palette(cudaTextureObject_t texture, float *output, int pairs) {
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= pairs) return;
+  int x = index % 255, y = index / 255;
+  for (int selector = 0; selector < 8; ++selector)
+    output[index * 8 + selector] = tex2D<float>(
+        texture, x * 4 + (selector & 3) + .5f, y * 4 + (selector >> 2) + .5f);
+}
+
+at::Tensor texelator_palette_probe() {
+  constexpr int pairs = 255 * 255;
+  std::vector<ProbeBlock> host(pairs);
+  uint64_t selectors = 0;
+  for (int i = 0; i < 16; ++i) selectors |= uint64_t(i & 7) << (3 * i);
+  for (int y = 0; y < 255; ++y) {
+    for (int x = 0; x < 255; ++x) {
+      ProbeBlock &block = host[y * 255 + x];
+      block.bytes[0] = static_cast<uint8_t>(static_cast<int8_t>(x - 127));
+      block.bytes[1] = static_cast<uint8_t>(static_cast<int8_t>(y - 127));
+      for (int byte = 0; byte < 6; ++byte)
+        block.bytes[byte + 2] = (selectors >> (8 * byte)) & 255;
+    }
+  }
+  cudaArray_t array = nullptr;
+  cudaTextureObject_t texture = 0;
+  float *device_output = nullptr;
+  cudaChannelFormatDesc description = cudaCreateChannelDesc<uint2>();
+  CUDA_CHECK(cudaMallocArray(&array, &description, 255, 255));
+  CUDA_CHECK(cudaMemcpy2DToArray(array, 0, 0, host.data(), 255 * 8, 255 * 8, 255,
+                                cudaMemcpyHostToDevice));
+  cudaResourceDesc resource{};
+  resource.resType = cudaResourceTypeArray;
+  resource.res.array.array = array;
+  cudaResourceViewDesc view{};
+  view.format = cudaResViewFormatSignedBlockCompressed4;
+  view.width = 1020;
+  view.height = 1020;
+  cudaTextureDesc texture_description{};
+  texture_description.addressMode[0] = cudaAddressModeClamp;
+  texture_description.addressMode[1] = cudaAddressModeClamp;
+  texture_description.filterMode = cudaFilterModePoint;
+  texture_description.readMode = cudaReadModeElementType;
+  CUDA_CHECK(cudaCreateTextureObject(&texture, &resource, &texture_description, &view));
+  CUDA_CHECK(cudaMalloc(&device_output, size_t(pairs) * 8 * sizeof(float)));
+  texelator_dump_palette<<<(pairs + 255) / 256, 256>>>(texture, device_output, pairs);
+  CUDA_CHECK(cudaGetLastError());
+  auto output = at::empty({pairs, 8}, at::TensorOptions().dtype(at::kFloat));
+  CUDA_CHECK(cudaMemcpy(output.data_ptr(), device_output, size_t(pairs) * 8 * sizeof(float),
+                        cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaFree(device_output));
+  CUDA_CHECK(cudaDestroyTextureObject(texture));
+  CUDA_CHECK(cudaFreeArray(array));
+  return output;
+}

@@ -27,4 +27,5 @@ runs/
 logs/
 profiles/local/
 paper_figures/
+research/paper_figures/
 .env

@@ -1,6 +1,9 @@
 include README.md QUICKSTART.md CHANGELOG.md PUBLISH.md LICENSE CITATION.cff
+include setup.ps1 texelator.cmd WINDOWS_VALIDATION.md
 recursive-include texelator/cuda *.cu *.cpp
 recursive-include docs *.md
-recursive-include paper *.pdf
-recursive-include results/paper *.csv *.json *.md
-include scripts/plot_paper_results.py
+recursive-include research/paper *.pdf
+recursive-include research/results/paper *.csv *.json *.md *.png
+include research/scripts/plot_paper_results.py
+include scripts/package_qwen38_27b.sh
+include scripts/upload_huggingface.py

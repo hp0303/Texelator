@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "texelator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Texture-backed low-bit inference runtime for local Hugging Face language models"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,8 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -23,6 +25,7 @@ dependencies = [
   "accelerate>=1.0,<2",
   "datasets>=3,<6",
   "huggingface-hub>=0.28,<2",
+  "jinja2>=3.1.0,<4",
   "numpy>=1.26,<3",
   "ninja>=1.11",
   "safetensors>=0.4",

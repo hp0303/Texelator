@@ -1,177 +1,141 @@
 # Texelator
-**Repurposing GPU texture unit for low-bit LLM inference.**
 
-Up to **1.37× faster decoding** on RTX 4080 SUPER, with quality competitive with activation-aware INT4 at the same compression ratio.
+**Low-bit LLM inference through the GPU Texture Unit.** Texelator stores eligible
+linear weights as signed BC4 blocks and reconstructs them in fixed-function texture
+hardware. It does not change the Transformer architecture.
 
-![Texelator benchmark](results/paper/tokenpss.png)
+![Decode throughput on RTX 4080 SUPER](research/results/paper/tokenpss.png)
 
+## Install and chat
 
-Texelator is an experimental inference runtime that stores supported language-model
-linear weights as signed BC4 blocks and reconstructs them with the GPU Texture Unit.
-It does **not** change the Transformer architecture. The source model remains a normal
-Hugging Face checkpoint; conversion creates a separate, linked BC4 artifact.
+### Windows 11 (native PowerShell)
 
-The public repository is for trying the runtime. It intentionally excludes model
-weights, Hugging Face caches, research benchmark suites, raw profiler traces, and the
-Q0--Q7 experiment directories.
+Download `texelator_native_windows_v0.2.0.zip` from the
+[latest release](https://github.com/hp0303/Texelator/releases/latest), extract it,
+open PowerShell in `texelator_windows`, and run:
 
-> Current scope: NVIDIA CUDA, FP16, dense decoder-only models, and batch-one inference.
-> RTX 4060 and RTX 4080 SUPER are validated. Other GPUs are checked at runtime and
-> should be treated as experimental until independently validated.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup.ps1
+.\texelator.cmd pull qwen3.8:27b
+.\texelator.cmd benchmark qwen3.8:27b
+.\texelator.cmd run qwen3.8:27b
+```
 
-## Install
+Requirements: Windows 11 x64, an RTX 40/50-series GPU, current NVIDIA driver,
+Python 3.10--3.14 x64, Visual Studio 2022 **Desktop development with C++**, and
+CUDA Toolkit 12.8. WSL is not required.
 
-WSL2 or Linux, a CUDA-enabled PyTorch installation, Python development headers,
-Ninja, and a CUDA toolkit containing `nvcc` are required. On Ubuntu/WSL, install
-`python3-venv`, `python3-dev`, and `build-essential` first. Install the PyTorch
-build appropriate for your GPU before running:
+### Linux or WSL2
 
 ```bash
 git clone https://github.com/hp0303/Texelator.git
-cd texelator
+cd Texelator
 bash scripts/install.sh
 source .venv/bin/activate
-texelator doctor
+texelator pull qwen3.8:27b
+texelator benchmark qwen3.8:27b
+texelator run qwen3.8:27b
 ```
 
-`doctor` measures and hashes the BC4 reconstruction palette of the current GPU.
+`benchmark` is required once for each model/GPU pair. It checks K candidates
+`{1,2,3,4,6,8}` for numerical agreement, selects the fastest valid texture-request
+schedule, and saves the result locally. Omit the prompt after `run` to start terminal
+chat. Thinking is off by default; use `/thinking on` and `/thinking off` interactively.
+Texelator imposes no default output-token limit and stops at EOS or the context limit.
 
-## Five explicit commands
+## What is included
 
-Texelator does not hide model download or conversion inside `run`.
+```text
+texelator/          Runtime, PTQ encoder, CUDA extension, and CLI
+scripts/            Linux installation and model publishing helpers
+docs/               Model support and developer documentation
+tests/              CPU-safe unit and repository tests
+research/
+  paper/            Current paper PDF
+  results/paper/    Compact public CSVs and the headline figure
+  scripts/          Figure reproduction code
+setup.ps1           Native Windows installer
+texelator.cmd       Native Windows command wrapper
+```
 
-### 1. Download a model
+Downloaded checkpoints, converted weights, Hugging Face caches, raw traces, and the
+internal Q0--Q7 experiment workspaces are intentionally excluded.
+
+## Use a published model
+
+The public model flow is deliberately explicit:
+
+```bash
+texelator pull qwen3.8:27b
+texelator benchmark qwen3.8:27b
+texelator run qwen3.8:27b "Introduce yourself in one sentence."
+```
+
+The published Qwen3.8-27B artifact is text-only. The same BC4 payload is shared by
+validated RTX 40- and RTX 50-series devices only when their measured hardware palette
+hash matches. CUDA kernels and K profiles are built or measured locally for the actual
+GPU.
+
+## Convert your own model
+
+Download a floating-point Hugging Face checkpoint:
 
 ```bash
 texelator model install Qwen/Qwen2.5-3B --name qwen-3b
 ```
 
-### 2. Or register a model you already have
+Or register an existing local checkpoint without copying or modifying it:
 
 ```bash
-texelator model register /mnt/models/Qwen2.5-3B --name qwen-3b
+texelator model register /models/Qwen2.5-3B --name qwen-3b
 ```
 
-Registration is read-only: files are not copied or modified. Supported sources are
-ordinary Hugging Face directories with `config.json`, tokenizer files, and FP16,
-BF16, or FP32 safetensors/PyTorch weights. GGUF and already packed GPTQ/AWQ weights
-cannot be converted because the encoder needs the original floating-point weights.
+Run activation-aware, hardware-exact BC4 PTQ and then benchmark it:
 
 ```bash
-texelator model list
+texelator ptq qwen-3b --name qwen-3b-awbc4 --output /models/qwen-3b-awbc4
+texelator benchmark qwen-3b-awbc4
+texelator run qwen-3b-awbc4
 ```
 
-### 3. Convert separately
+PTQ requires the original FP16, BF16, or FP32 checkpoint. Already packed GPTQ, AWQ,
+and GGUF files cannot be converted because the encoder needs source-precision weights.
+The current general path targets dense causal LMs with ordinary `q_proj`, `k_proj`,
+`v_proj`, `o_proj`, `gate_proj`, `up_proj`, and `down_proj` linears whose input
+dimension is divisible by 16. MoE routing, arbitrary multimodal/hybrid architectures,
+and tensor-parallel conversion are not automatic.
 
-```bash
-texelator convert qwen-3b --output /mnt/models/qwen-3b-texelator
-```
+See [QUICKSTART.md](QUICKSTART.md), [local model guidance](docs/local-models.md), and
+[supported models](docs/supported-models.md) for details.
 
-The default encoder uses 8,192 WikiText-2 calibration tokens, the measured hardware
-palette, activation-weighted endpoint fitting, and the frozen ±1 integer search.
-Conversion resumes verified matrix files after interruption. The source model is
-never overwritten.
+## Platform and numerical scope
 
-Use a local calibration text if network access is unavailable:
+- Native Windows 11, Linux, and WSL2 are supported from source.
+- RTX 4060, RTX 4080 SUPER, and RTX 5080 have been validated.
+- Activations and outputs are FP16; accumulation uses FP32 registers.
+- Current inference targets batch-one CUDA execution.
+- GPU-specific hardware reconstruction is measured and protected by a palette hash.
 
-```bash
-texelator convert qwen-3b \
-  --calibration-file /mnt/data/calibration.txt \
-  --output /mnt/models/qwen-3b-texelator
-```
+Windows local state defaults to `%LOCALAPPDATA%\Texelator`. Linux/WSL state defaults
+to `~/.cache/texelator`. Set `TEXELATOR_HOME` and `HF_HOME` to place data elsewhere.
 
-### 4. Tune the texture-request lookahead
+## Research artifacts
 
-```bash
-texelator tune /mnt/models/qwen-3b-texelator
-```
-
-Candidates `{1,2,3,4,6,8}` must pass an output-equivalence check before timing.
-The selected profile is stored inside the converted artifact. Without a matching
-profile, execution uses the safe `K=1` schedule and prints a warning.
-
-### 5. Run
-
-```bash
-texelator run /mnt/models/qwen-3b-texelator "Explain BC4 compression."
-```
-
-Omit the prompt for an interactive session:
-
-```bash
-texelator run /mnt/models/qwen-3b-texelator
-```
-
-Run the registered original model without BC4:
-
-```bash
-texelator run qwen-3b --backend fp16 "Hello"
-```
-
-By default, converted linears are used for both prefill and decode so dense linear
-weights can be released after installation. This saves VRAM but does not accelerate
-prefill. `--fp16-prefill` retains the original linears and routes multi-token shapes
-through them, matching the paper's decode-only operator boundary at higher VRAM cost.
-
-## Local state
-
-The default state directory is `~/.cache/texelator`:
-
-```text
-~/.cache/texelator/
-├── models.json
-├── hardware/sm_89/{palette.bin,palette.json,environment.json}
-├── artifacts/<name>/
-└── build/
-```
-
-Move it to another disk with:
-
-```bash
-export TEXELATOR_HOME=/mnt/fast/texelator
-export HF_HOME=/mnt/models/huggingface
-```
-
-Converted artifacts are linked: embeddings, tokenizer, configuration, and unsupported
-weights are loaded from the registered source directory. Keep that directory available.
-
-## Model compatibility
-
-Texelator discovers ordinary projections by suffix rather than hard-coding a Qwen
-layer path. The default set is `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`,
-`up_proj`, and `down_proj`. A weight is eligible when its input dimension is divisible
-by 16. Unsupported modules remain on the original FP16 path.
-
-- Validated: Qwen2.5 0.5B, 1.5B, 3B; DeepSeek-Coder 1.3B.
-- Structurally compatible but not yet fully validated: other dense Hugging Face causal LMs
-  exposing ordinary `torch.nn.Linear` projections.
-- Not automatic: MoE scheduling, `Conv1D`, non-CUDA backends, tensor-parallel conversion,
-  and arbitrary fused projection semantics.
-
-See [local model guidance](docs/local-models.md) and
-[support boundaries](docs/supported-models.md).
-
-For a compact end-to-end walkthrough, see [QUICKSTART.md](QUICKSTART.md).
-
-## Paper
-
-The current manuscript is included as [paper/Texelator.pdf](paper/Texelator.pdf).
-Performance claims in the paper use an audited native-vLLM harness; the simple
-Transformers CLI in this repository is intended for accessibility, not for reproducing
-the paper's comparison tables.
-
-The compact CSVs behind the primary paper tables and plots are available in
-[`results/paper`](results/paper). They include protocol and environment metadata but
-exclude model weights, prompts, and raw traces. Regenerate the public figures with:
+The current manuscript is [research/paper/Texelator.pdf](research/paper/Texelator.pdf).
+Compact measurements used by the public figures are under
+[research/results/paper](research/results/paper). Regenerate the figures with:
 
 ```bash
 python -m pip install -e '.[paper]'
-python scripts/plot_paper_results.py
+python research/scripts/plot_paper_results.py
 ```
 
-This command reproduces figures from frozen measurements; it does not rerun inference.
+The paper uses an audited native-vLLM evaluation harness. The Transformers CLI in
+this repository prioritizes simple local use and is not presented as a bit-for-bit
+replacement for every paper benchmark harness.
 
 ## License
 
-Texelator is released under the MIT License. Model checkpoints and datasets retain
-their own licenses and are not distributed in this repository.
+Texelator is released under the MIT License. Models and datasets retain their own
+licenses and are not distributed in this Git repository.

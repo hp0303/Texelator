@@ -10,8 +10,9 @@ The directory must contain `config.json` and either safetensors or PyTorch check
 weights. Sharded checkpoints and Hugging Face snapshot directories are accepted.
 
 The source directory is opened read-only by the converter. BC4 blocks, row scales,
-calibration moments, checksums, and tuning profiles are written only to the explicit
-artifact output directory.
+calibration moments, and checksums are written only to the explicit artifact output
+directory. Benchmark profiles are local machine state under
+`~/.cache/texelator/profiles`; they are keyed by encoded-weight hash and GPU.
 
 Examples:
 
@@ -28,4 +29,3 @@ texelator model register \
 Moving or deleting a linked source invalidates the converted artifact. Register the
 new path and reconvert; artifact manifests are deliberately immutable so a changed
 checkpoint cannot be mistaken for the encoded source.
-

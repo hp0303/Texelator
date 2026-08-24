@@ -7,14 +7,18 @@ from pathlib import Path
 import torch
 
 from .artifacts import sha256_file, write_json
-from .runtime import extension, free, pack_entry
+from .hardware import ensure_hardware
+from .runtime import extension, free, pack_entry_handles
+from .store import STATE_HOME, safe_name
 
 CANDIDATES = (1, 2, 3, 4, 6, 8)
 
 
 def _profile_path(artifact: Path) -> Path:
     major, minor = torch.cuda.get_device_capability()
-    return artifact / "profiles" / f"sm_{major}{minor}.json"
+    metadata_hash = sha256_file(artifact / "weights" / "metadata.json")
+    device = safe_name(torch.cuda.get_device_name())
+    return STATE_HOME / "profiles" / metadata_hash[:20] / f"sm_{major}{minor}-{device}.json"
 
 
 def tune_artifact(
@@ -26,6 +30,10 @@ def tune_artifact(
     if not torch.cuda.is_available():
         raise RuntimeError("tuning requires a visible CUDA GPU")
     manifest = json.loads((artifact / "texelator.json").read_text())
+    current_palette = ensure_hardware()
+    expected_palette = manifest.get("hardware", {}).get("palette_sha256")
+    if not expected_palette or sha256_file(current_palette) != expected_palette:
+        raise RuntimeError("model BC4 palette does not match this GPU; benchmark aborted")
     weights = artifact / manifest["weights"]
     metadata_path = weights / "metadata.json"
     metadata = json.loads(metadata_path.read_text())
@@ -34,22 +42,31 @@ def tune_artifact(
         raise RuntimeError("artifact contains no encoded linears")
     ext = extension()
     handles: list[int] = []
+    handle_groups: list[list[int]] = []
     inputs: list[torch.Tensor] = []
     try:
         generator = torch.Generator(device="cuda").manual_seed(0)
         for entry in entries:
-            handles.append(pack_entry(weights, entry, lookahead=1))
+            group = pack_entry_handles(weights, entry, lookahead=1)
+            handle_groups.append(group)
+            handles.extend(group)
             inputs.append(torch.randn((1, int(entry["K"])), device="cuda", dtype=torch.float16,
                                       generator=generator))
 
-        reference = [ext.linear(handle, value).float() for handle, value in list(zip(handles, inputs))[:8]]
+        def evaluate(group: list[int], value: torch.Tensor) -> torch.Tensor:
+            parts = [ext.linear(handle, value) for handle in group]
+            return (parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)).float()
+
+        paired = list(zip(handle_groups, inputs))
+        sample = paired if len(paired) <= 8 else paired[:4] + paired[-4:]
+        reference = [evaluate(group, value) for group, value in sample]
         rows = []
         for candidate in CANDIDATES:
             for handle in handles:
                 ext.set_lookahead(handle, candidate)
             candidate_values = [
-                ext.linear(handle, value).float()
-                for handle, value in list(zip(handles, inputs))[:8]
+                evaluate(group, value)
+                for group, value in sample
             ]
             max_abs = max(
                 float((got - expected).abs().max().item())
@@ -58,8 +75,9 @@ def tune_artifact(
             if max_abs > 1e-3:
                 raise RuntimeError(f"lookahead K={candidate} failed correctness: max_abs={max_abs}")
             for _ in range(warmup):
-                for handle, value in zip(handles, inputs):
-                    ext.linear(handle, value)
+                for group, value in zip(handle_groups, inputs):
+                    for handle in group:
+                        ext.linear(handle, value)
             torch.cuda.synchronize()
             timings = []
             for _ in range(runs):
@@ -67,8 +85,9 @@ def tune_artifact(
                 stop = torch.cuda.Event(enable_timing=True)
                 start.record()
                 for _ in range(measured):
-                    for handle, value in zip(handles, inputs):
-                        ext.linear(handle, value)
+                    for group, value in zip(handle_groups, inputs):
+                        for handle in group:
+                            ext.linear(handle, value)
                 stop.record()
                 torch.cuda.synchronize()
                 timings.append(start.elapsed_time(stop) / measured)
@@ -89,6 +108,8 @@ def tune_artifact(
             "device": torch.cuda.get_device_name(),
             "compute_capability": f"{major}.{minor}",
             "weights_metadata_sha256": sha256_file(metadata_path),
+            "palette_sha256": expected_palette,
+            "artifact": str(artifact.resolve()),
             "linears": len(entries),
             "warmup_sweeps": warmup,
             "measured_sweeps": measured,
@@ -98,7 +119,7 @@ def tune_artifact(
         }
         target = _profile_path(artifact)
         write_json(target, profile)
-        print(f"[texelator] selected K={selected}; profile saved to {target}")
+        print(f"[texelator] selected K={selected}; local benchmark profile saved to {target}")
         return profile
     finally:
         free(handles)
@@ -111,6 +132,8 @@ def selected_lookahead(artifact: Path) -> tuple[int, Path | None]:
     profile = json.loads(target.read_text())
     expected = sha256_file(artifact / "weights" / "metadata.json")
     if profile.get("weights_metadata_sha256") != expected:
-        raise RuntimeError("tuning profile does not match the encoded weights; rerun texelator tune")
+        raise RuntimeError("benchmark profile does not match the encoded weights; rerun texelator benchmark")
+    manifest = json.loads((artifact / "texelator.json").read_text())
+    if profile.get("palette_sha256") != manifest.get("hardware", {}).get("palette_sha256"):
+        raise RuntimeError("benchmark profile does not match the model palette; rerun texelator benchmark")
     return int(profile["selected_lookahead"]), target
-

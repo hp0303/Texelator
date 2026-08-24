@@ -37,14 +37,17 @@ sm120 as validated only after an RTX 50-series runtime test reproduces the palet
 
 ## GitHub release
 
-Build the native Windows source archive from a clean checkout. The archive contains
-the runtime, installer, documentation, and tests, but excludes `research/`, `.git`,
-model weights, caches, and generated profiles. Publish both the ZIP and its SHA256 file:
+Build the native Windows and Linux/WSL2 source archives from a clean checkout. The
+Windows archive contains the runtime, installer, documentation, and tests. The
+Linux/WSL2 archive is a clean tagged source snapshot. Neither archive contains model
+weights, caches, or generated profiles. Publish both archives and their SHA256 files:
 
 ```bash
 gh release create v0.2.0 \
-  texelator_native_windows_v0.2.0.zip \
-  texelator_native_windows_v0.2.0.zip.sha256 \
+  texelator-v0.2.0-windows.zip \
+  texelator-v0.2.0-windows.zip.sha256 \
+  texelator-v0.2.0-linux-wsl2.zip \
+  texelator-v0.2.0-linux-wsl2.zip.sha256 \
   --title "Texelator v0.2.0" \
   --notes-file docs/releases/v0.2.0.md
 ```

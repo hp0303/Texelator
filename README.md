@@ -4,13 +4,20 @@
 linear weights as signed BC4 blocks and reconstructs them in fixed-function texture
 hardware. It does not change the Transformer architecture.
 
+> **Featured model:** Qwen3.8-27B is supported as a published, text-only
+> activation-aware BC4 model on validated RTX 40- and RTX 50-series GPUs.
+
+[Paper (PDF)](research/paper/Texelator.pdf) ·
+[Qwen3.8-27B model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4) ·
+[Latest release](https://github.com/hp0303/Texelator/releases/latest)
+
 ![Decode throughput on RTX 4080 SUPER](research/results/paper/tokenpss.png)
 
 ## Install and chat
 
 ### Windows 11 (native PowerShell)
 
-Download `texelator_native_windows_v0.2.0.zip` from the
+Download `texelator-v0.2.0-windows.zip` from the
 [latest release](https://github.com/hp0303/Texelator/releases/latest), extract it,
 open PowerShell in `texelator_windows`, and run:
 

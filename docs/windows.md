@@ -9,7 +9,7 @@ Texelator runs directly in Windows 11 PowerShell; WSL is optional.
 - Visual Studio 2022 Build Tools with **Desktop development with C++**
 - CUDA Toolkit 12.8 with `nvcc.exe`
 
-Download `texelator_native_windows_v0.2.0.zip` from the latest GitHub Release and
+Download `texelator-v0.2.0-windows.zip` from the latest GitHub Release and
 extract it. In the extracted `texelator_windows` directory:
 
 ```powershell

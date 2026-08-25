@@ -9,6 +9,7 @@ hardware. It does not change the Transformer architecture.
 
 [Paper (PDF)](research/paper/Texelator.pdf) ·
 [Qwen3.8-27B model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4) ·
+[Discord](https://discord.gg/WVtBQxxzp6) ·
 [Latest release](https://github.com/hp0303/Texelator/releases/latest)
 
 > **Early alpha — bug reports are very welcome.** Texelator is still experimental,
@@ -148,6 +149,16 @@ python research/scripts/plot_paper_results.py
 The paper uses an audited native-vLLM evaluation harness. The Transformers CLI in
 this repository prioritizes simple local use and is not presented as a bit-for-bit
 replacement for every paper benchmark harness.
+
+## Community and support
+
+Join the [Texelator Discord](https://discord.gg/WVtBQxxzp6) for installation help,
+Windows/Linux/WSL support, GPU compatibility reports, benchmark results, and
+development discussion.
+
+Please continue to use [GitHub Issues](https://github.com/hp0303/Texelator/issues)
+for reproducible bug reports and feature requests so they remain searchable and
+trackable.
 
 ## License
 

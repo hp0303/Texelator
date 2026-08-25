@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added hybrid multi-token prefill: BC4 `tex2Dgather()` tile reconstruction followed
+  by cuBLAS Tensor Core GEMM, while preserving the existing texture GEMV decode path.
+- Added `texelator prefill-benchmark` with scalar-vs-hybrid correctness, wall timing,
+  CUDA-event timing, throughput, environment capture, and JSON output.
+- Added bounded adaptive workspace sizing and explicit prefill threshold/tile controls.
+
 ## 0.2.0
 
 - Added a native Windows 11 installer and command wrapper, validated on RTX 5080.

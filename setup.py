@@ -25,6 +25,7 @@ def cuda_extensions():
             "cxx": (["/O2"] if sys.platform == "win32" else ["-O3"]),
             "nvcc": ["-O3", "--use_fast_math", "-lineinfo"],
         },
+        libraries=["cublas"],
     )
     return [extension], {"build_ext": BuildExtension.with_options(no_python_abi_suffix=True)}
 

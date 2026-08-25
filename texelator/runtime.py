@@ -16,6 +16,8 @@ from .adapters import resolve_parent
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 _EXTENSION = None
+PREFILL_THRESHOLD = int(os.environ.get("TEXELATOR_PREFILL_THRESHOLD", "16"))
+PREFILL_TILE_ROWS = int(os.environ.get("TEXELATOR_PREFILL_TILE_ROWS", "1024"))
 
 
 def extension(verbose: bool = False):
@@ -41,6 +43,7 @@ def extension(verbose: bool = False):
                 str(PACKAGE_ROOT / "cuda" / "texelator_cuda.cu"),
             ],
             extra_cuda_cflags=["-O3", "--use_fast_math", "-lineinfo"],
+            extra_ldflags=(["cublas.lib"] if sys.platform == "win32" else ["-lcublas"]),
             verbose=verbose,
         )
     return _EXTENSION
@@ -88,6 +91,7 @@ def pack_entry(weights: Path, entry: dict, bias: torch.Tensor | None = None, loo
         bias,
     )
     extension().set_lookahead(handle, lookahead)
+    extension().set_prefill(handle, PREFILL_THRESHOLD, PREFILL_TILE_ROWS)
     return handle
 
 
@@ -114,6 +118,7 @@ def pack_entry_handles(
             bias_slice = bias[start:stop] if bias is not None else None
             handle = extension().pack_encoded(block_tensor, scale_tensor, bias_slice)
             extension().set_lookahead(handle, lookahead)
+            extension().set_prefill(handle, PREFILL_THRESHOLD, PREFILL_TILE_ROWS)
             handles.append(handle)
     except Exception:
         free(handles)

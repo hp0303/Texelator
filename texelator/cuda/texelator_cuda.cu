@@ -4,6 +4,8 @@
 #include <c10/util/Optional.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -12,8 +14,14 @@
   TORCH_CHECK(error == cudaSuccess, "CUDA: ", cudaGetErrorString(error)); \
 } while (0)
 
+#define CUBLAS_CHECK(call) do { \
+  cublasStatus_t status = (call); \
+  TORCH_CHECK(status == CUBLAS_STATUS_SUCCESS, "cuBLAS error: ", int(status)); \
+} while (0)
+
 struct Handle {
   int M, K, blocks_per_row, device, lookahead = 2;
+  int prefill_threshold = 16, prefill_tile_rows = 1024;
   cudaArray_t array = nullptr;
   cudaTextureObject_t texture = 0;
   float *scales = nullptr;
@@ -91,6 +99,92 @@ __global__ void texelator_bc4_kernel(cudaTextureObject_t texture, const __half *
     y[row] = __float2half(accumulator + (bias ? __half2float(bias[row]) : 0.f));
 }
 
+// Multi-token prefill path. BC4 remains resident. Only a bounded row tile is
+// reconstructed into temporary FP16, then immediately reused by cuBLAS across
+// all prompt tokens. Single-token decode never enters this path.
+__global__ void texelator_decode_tile(cudaTextureObject_t texture,
+                       const float *scales, __half *dense, int row_start,
+                       int rows, int K, int blocks_per_row) {
+  size_t index = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  // One gather reconstructs a 2x2 quadrant: four adjacent logical weights.
+  // Four quadrants therefore cover one 16-value BC4 block with four TLD4s.
+  size_t groups_per_row = size_t(blocks_per_row) * 4;
+  size_t count = size_t(rows) * groups_per_row;
+  if (index >= count) return;
+  int local_row = index / groups_per_row;
+  int group = index - size_t(local_row) * groups_per_row;
+  int block = group >> 2;
+  int quadrant = group & 3;
+  int qx = (quadrant & 1) * 2;
+  int qy = (quadrant >> 1) * 2;
+  int row = row_start + local_row;
+  float4 values = tex2Dgather<float4>(
+      texture, block * 4 + qx + 1.f, row * 4 + qy + 1.f, 0);
+  float scale = scales[row];
+  size_t offset = size_t(local_row) * K + block * 16 + qy * 4 + qx;
+  dense[offset] = __float2half(values.w * scale);
+  dense[offset + 1] = __float2half(values.z * scale);
+  dense[offset + 4] = __float2half(values.x * scale);
+  dense[offset + 5] = __float2half(values.y * scale);
+}
+
+__global__ void texelator_add_bias(__half *output, const __half *bias,
+                                   size_t values, int M) {
+  size_t index = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index < values)
+    output[index] = __hadd(output[index], bias[index % M]);
+}
+
+at::Tensor texelator_prefill(Handle *handle, at::Tensor x, int tokens,
+                             const std::vector<int64_t> &shape,
+                             cudaStream_t stream) {
+  auto y = at::empty(shape, x.options());
+  size_t free_bytes = 0, total_bytes = 0;
+  CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
+  size_t row_bytes = size_t(handle->K) * sizeof(__half);
+  size_t budget = free_bytes > (64ull << 20) ? (free_bytes - (64ull << 20)) / 4 : 0;
+  int tile_rows = int(std::min<size_t>(handle->prefill_tile_rows,
+      row_bytes ? budget / row_bytes : 0));
+  tile_rows = std::min(tile_rows, handle->M);
+  if (tile_rows >= 16) tile_rows = (tile_rows / 16) * 16;
+  TORCH_CHECK(tile_rows >= 1,
+      "insufficient CUDA memory for Texelator prefill workspace; free bytes=",
+      free_bytes, ", bytes per dense row=", row_bytes);
+  auto dense = at::empty({tile_rows, handle->K}, x.options());
+  cublasHandle_t blas = at::cuda::getCurrentCUDABlasHandle();
+  CUBLAS_CHECK(cublasSetStream(blas, stream));
+  const float alpha = 1.f, beta = 0.f;
+  auto *x_ptr = static_cast<const __half *>(x.data_ptr());
+  auto *y_ptr = static_cast<__half *>(y.data_ptr());
+  auto *dense_ptr = static_cast<__half *>(dense.data_ptr());
+  for (int row_start = 0; row_start < handle->M; row_start += tile_rows) {
+    int rows = std::min(tile_rows, handle->M - row_start);
+    size_t gather_groups = size_t(rows) * handle->blocks_per_row * 4;
+    texelator_decode_tile<<<(gather_groups + 255) / 256, 256, 0, stream>>>(
+        handle->texture, handle->scales, dense_ptr, row_start, rows,
+        handle->K, handle->blocks_per_row);
+    CUDA_CHECK(cudaGetLastError());
+    // Row-major Y = X W^T is column-major Y^T = W X^T. ldc remains the
+    // complete output width, so every row tile is written directly into Y.
+    CUBLAS_CHECK(cublasGemmEx(
+        blas, CUBLAS_OP_T, CUBLAS_OP_N,
+        rows, tokens, handle->K,
+        &alpha,
+        dense_ptr, CUDA_R_16F, handle->K,
+        x_ptr, CUDA_R_16F, handle->K,
+        &beta,
+        y_ptr + row_start, CUDA_R_16F, handle->M,
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  }
+  if (handle->bias) {
+    size_t values = size_t(tokens) * handle->M;
+    texelator_add_bias<<<(values + 255) / 256, 256, 0, stream>>>(
+        y_ptr, handle->bias, values, handle->M);
+    CUDA_CHECK(cudaGetLastError());
+  }
+  return y;
+}
+
 uint64_t texelator_pack_encoded(at::Tensor blocks, at::Tensor scales,
                              c10::optional<at::Tensor> bias) {
   TORCH_CHECK(!blocks.is_cuda() && blocks.scalar_type() == at::kByte && blocks.is_contiguous(),
@@ -103,7 +197,7 @@ uint64_t texelator_pack_encoded(at::Tensor blocks, at::Tensor scales,
   int K = blocks_per_row * 16;
   int device;
   CUDA_CHECK(cudaGetDevice(&device));
-  auto *handle = new Handle{M, K, blocks_per_row, device, 2};
+  auto *handle = new Handle{M, K, blocks_per_row, device, 2, 16, 1024};
   cudaChannelFormatDesc description = cudaCreateChannelDesc<uint2>();
   CUDA_CHECK(cudaMallocArray(&handle->array, &description, blocks_per_row, M));
   CUDA_CHECK(cudaMemcpy2DToArray(handle->array, 0, 0, blocks.data_ptr(), size_t(blocks_per_row) * 8,
@@ -140,11 +234,13 @@ at::Tensor texelator_linear(uint64_t value, at::Tensor x) {
               "input must be contiguous CUDA FP16");
   TORCH_CHECK(x.size(-1) == handle->K && x.get_device() == handle->device, "input shape/device mismatch");
   int tokens = x.numel() / handle->K;
-  TORCH_CHECK(tokens <= 65535, "token grid exceeds CUDA grid.y limit");
   auto shape = x.sizes().vec();
   shape.back() = handle->M;
-  auto y = at::empty(shape, x.options());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(handle->device);
+  if (tokens >= handle->prefill_threshold)
+    return texelator_prefill(handle, x, tokens, shape, stream);
+  TORCH_CHECK(tokens <= 65535, "token grid exceeds CUDA grid.y limit");
+  auto y = at::empty(shape, x.options());
   dim3 grid((handle->M + 7) / 8, tokens);
 #define LAUNCH_K(KVALUE) texelator_bc4_kernel<KVALUE><<<grid, 256, 0, stream>>>(handle->texture, \
       static_cast<const __half *>(x.data_ptr()), handle->scales, handle->bias, \
@@ -170,6 +266,16 @@ void texelator_set_lookahead(uint64_t value, int lookahead) {
               lookahead == 4 || lookahead == 6 || lookahead == 8,
               "lookahead must be one of 1,2,3,4,6,8");
   handle->lookahead = lookahead;
+}
+
+void texelator_set_prefill(uint64_t value, int threshold, int tile_rows) {
+  auto *handle = reinterpret_cast<Handle *>(value);
+  TORCH_CHECK(handle, "null Texelator handle");
+  TORCH_CHECK(threshold >= 1, "prefill threshold must be positive");
+  TORCH_CHECK(tile_rows >= 16 && tile_rows % 16 == 0,
+              "prefill tile rows must be a positive multiple of 16");
+  handle->prefill_threshold = threshold;
+  handle->prefill_tile_rows = tile_rows;
 }
 
 void texelator_free(uint64_t value) { delete reinterpret_cast<Handle *>(value); }

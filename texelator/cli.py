@@ -130,6 +130,18 @@ def command_benchmark(args) -> None:
     )
 
 
+def command_prefill_benchmark(args) -> None:
+    from .prefill import benchmark_prefill
+
+    benchmark_prefill(
+        _resolve_runtime_artifact(args.artifact, auto_pull=False),
+        tokens=args.tokens,
+        warmup=args.warmup,
+        runs=args.runs,
+        output=Path(args.output).expanduser().resolve(),
+    )
+
+
 def _prompt_ids(tokenizer, messages: list[dict], raw: bool, thinking: bool = False) -> torch.Tensor:
     if not raw and getattr(tokenizer, "chat_template", None):
         value = tokenizer.apply_chat_template(
@@ -363,6 +375,17 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--measured", type=int, default=50)
     benchmark.add_argument("--runs", type=int, default=3)
     benchmark.set_defaults(function=command_benchmark)
+
+    prefill = commands.add_parser(
+        "prefill-benchmark",
+        help="compare legacy scalar prefill with hybrid BC4/cuBLAS prefill",
+    )
+    prefill.add_argument("artifact")
+    prefill.add_argument("--tokens", type=int, default=512)
+    prefill.add_argument("--warmup", type=int, default=1)
+    prefill.add_argument("--runs", type=int, default=3)
+    prefill.add_argument("--output", default="texelator-prefill-benchmark.json")
+    prefill.set_defaults(function=command_prefill_benchmark)
 
     run = commands.add_parser("run", help="run a converted artifact or an FP16 source model")
     run.add_argument("target")

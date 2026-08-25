@@ -58,6 +58,21 @@ schedule, and saves the result locally. Omit the prompt after `run` to start ter
 chat. Thinking is off by default; use `/thinking on` and `/thinking off` interactively.
 Texelator imposes no default output-token limit and stops at EOS or the context limit.
 
+Texelator automatically uses two execution paths: single-token decode keeps the
+texture-native GEMV selected by `benchmark`, while multi-token prompt prefill decodes
+a bounded BC4 row tile with `tex2Dgather()` and reuses it through a cuBLAS Tensor Core
+GEMM. This avoids rereading every weight independently for every prompt token and does
+not keep a second FP16 copy of the model. Check both paths on a standalone artifact with:
+
+```bash
+texelator prefill-benchmark qwen3.8:27b --tokens 512 \
+  --output texelator-prefill-512.json
+```
+
+The command first compares the hybrid result against the legacy scalar texture path,
+then records wall/GPU prefill throughput and speedup. See
+[hybrid prefill](docs/hybrid-prefill.md) for its scope and tuning controls.
+
 ## What is included
 
 ```text
@@ -129,6 +144,8 @@ See [QUICKSTART.md](QUICKSTART.md), [local model guidance](docs/local-models.md)
 - RTX 4060, RTX 4080 SUPER, and RTX 5080 have been validated.
 - Activations and outputs are FP16; accumulation uses FP32 registers.
 - Current inference targets batch-one CUDA execution.
+- Multi-token prefill uses a temporary FP16 row-tile workspace; it does not retain a
+  dense FP16 checkpoint.
 - GPU-specific hardware reconstruction is measured and protected by a palette hash.
 
 Windows local state defaults to `%LOCALAPPDATA%\Texelator`. Linux/WSL state defaults

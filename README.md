@@ -7,7 +7,7 @@ hardware. It does not change the Transformer architecture.
 > **Featured model:** Qwen3.8-27B is supported as a published, text-only
 > activation-aware BC4 model on validated RTX 40- and RTX 50-series GPUs.
 
-[Paper (PDF)](https://github.com/hp0303/Texelator/blob/main/research/paper/Texelator.pdf) ·
+[Paper (PDF)](research/paper/Texelator.pdf) ·
 [Qwen3.8-27B model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4) ·
 [Latest release](https://github.com/hp0303/Texelator/releases/latest)
 
@@ -136,8 +136,7 @@ to `~/.cache/texelator`. Set `TEXELATOR_HOME` and `HF_HOME` to place data elsewh
 
 ## Research artifacts
 
-The current manuscript is available as the
-[Texelator paper (PDF)](https://github.com/hp0303/Texelator/blob/main/research/paper/Texelator.pdf).
+The current manuscript is [research/paper/Texelator.pdf](research/paper/Texelator.pdf).
 Compact measurements used by the public figures are under
 [research/results/paper](research/results/paper). Regenerate the figures with:
 

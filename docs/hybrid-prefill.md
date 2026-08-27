@@ -1,46 +1,57 @@
-# Hybrid prefill
+# BF16 and experimental FP4 prefill
 
-Texelator's original CUDA operator was designed for batch-one decode. For an input
-with `T` tokens it launched the same texture GEMV independently `T` times. That is the
-right work shape for `T=1`, but it provides no weight reuse during prompt prefill and
-therefore makes long prompts unnecessarily slow.
+Texelator keeps its texture-native GEMV for single-token decode. Multi-token BF16
+prefill uses a CUTLASS Tensor Core mainloop whose IteratorB reconstructs BC4 weights
+with `tex2Dgather()` directly into the shared-memory pipeline. It does not retain or
+write a second dense checkpoint.
 
-The hybrid path keeps the published BC4 representation resident and switches only the
-arithmetic schedule:
+## One-time GPU autotuning
 
-1. `tex2Dgather()` reconstructs four BC4 values per texture request into a bounded
-   FP16 row-tile workspace.
-2. cuBLAS reuses that tile across all prompt tokens with a Tensor Core GEMM.
-3. The workspace is reused for the next row tile and released when the linear call
-   completes.
-
-Single-token decode continues to use the tuned rolling-gather GEMV. There is no
-second dense checkpoint and no change to the BC4 payload, row scales, or palette.
-
-## Verify on a GPU
-
-Run the normal one-time decode benchmark first, then compare the legacy and hybrid
-prefill paths in one process:
+Run:
 
 ```bash
 texelator benchmark qwen3.8:27b
+```
+
+The command first tunes decode lookahead, then benchmarks five bitwise-equivalent
+BF16 prefill tiles at 32, 128, and 512 prompt tokens. Profiles are keyed by encoded
+weight hash, CUDA kernel hash, compute capability, device name, and SM count. A
+profile from another GPU or build is rejected rather than silently reused.
+
+The candidate tiles are `256x128x32`, `128x128x32`, `128x64x32`, `64x128x32`, and
+`32x32x64`. On Qwen3.8-27B and RTX 5080, this changed 512-token prefill from
+599.8 ms to 475.4 ms (853.6 to 1076.9 token/s) with bitwise-identical full-model
+output. Results are hardware-specific and must not be copied to another GPU.
+
+## Runtime modes
+
+Quality-preserving BF16 is the default:
+
+```bash
+texelator run qwen3.8:27b --prefill-mode bf16
+```
+
+An experimental 512-token MLP-only path reconstructs BC4 into packed FP4 scratch,
+quantizes activations, and uses native FP4 Tensor Core GEMM:
+
+```bash
+texelator run qwen3.8:27b --prefill-mode fp4
+```
+
+The FP4 mode is a speed experiment, not a quality-preserving backend. Its RTX 5080
+full-model prefill result was 386.2 ms / 1325.8 token/s versus 480.3 ms / 1066.1
+token/s for autotuned BF16, but the final hidden-state comparison was cosine 0.872
+and relative RMS 0.507. It is disabled by default and currently activates only for
+exactly 512 tokens and the Qwen3.8-27B gate/up/down projection shapes. Other shapes
+fall back to the selected BF16 path.
+
+## Verification
+
+```bash
 texelator prefill-benchmark qwen3.8:27b \
   --tokens 512 --warmup 1 --runs 3 \
   --output texelator-prefill-512.json
 ```
 
-The benchmark calls the Transformer body rather than the language-model head. Its
-token/s number therefore measures prompt processing, not generated-token decode. It
-records both wall-clock and CUDA-event timing. The run fails instead of publishing a
-speed number when the hybrid full-model hidden state differs from the scalar path by
-more than the correctness gate.
-
-## Controls
-
-- `TEXELATOR_PREFILL_THRESHOLD` selects the minimum flattened token count for the
-  hybrid path. The default is `16`.
-- `TEXELATOR_PREFILL_TILE_ROWS` caps the reconstructed row tile. The default is
-  `1024`; the runtime reduces it automatically when free VRAM is low.
-
-These are diagnostic controls, not model-format parameters. They do not affect the
-saved K/lookahead profile used for single-token decode.
+The benchmark records wall time, CUDA-event time, throughput, and correctness. The
+normal runtime must use the profile produced by `texelator benchmark`.

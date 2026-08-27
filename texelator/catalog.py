@@ -14,7 +14,7 @@ ARTIFACT_REGISTRY = STATE_HOME / "artifacts.json"
 MODEL_CATALOG = {
     "qwen3.8:27b": {
         "8.9": "hp0303/Qwen3.8-27B-Texelator-AWBC4",
-        "12.0": "hp0303/Qwen3.8-27B-Texelator-AWBC4",
+        "12.0": "hp0303/Qwen3.8-27B-Texelator-AWBC4-BF16Cal",
     },
 }
 

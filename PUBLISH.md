@@ -43,13 +43,13 @@ Linux/WSL2 archive is a clean tagged source snapshot. Neither archive contains m
 weights, caches, or generated profiles. Publish both archives and their SHA256 files:
 
 ```bash
-gh release create v0.2.0 \
-  texelator-v0.2.0-windows.zip \
-  texelator-v0.2.0-windows.zip.sha256 \
-  texelator-v0.2.0-linux-wsl2.zip \
-  texelator-v0.2.0-linux-wsl2.zip.sha256 \
-  --title "Texelator v0.2.0" \
-  --notes-file docs/releases/v0.2.0.md
+gh release create v0.3.0 \
+  texelator-v0.3.0-windows.zip \
+  texelator-v0.3.0-windows.zip.sha256 \
+  texelator-v0.3.0-linux-wsl2.zip \
+  texelator-v0.3.0-linux-wsl2.zip.sha256 \
+  --title "Texelator v0.3.0" \
+  --notes-file docs/releases/v0.3.0.md
 ```
 
 Do not upload a converted model to the GitHub Release. Published BC4 model artifacts

@@ -118,7 +118,7 @@ def benchmark_prefill(
             "prefill_tile_rows": PREFILL_TILE_ROWS,
             "correctness": correctness,
             "scalar_texture": scalar,
-            "hybrid_texture_cublas": hybrid,
+            "fused_texture_tensorcore": hybrid,
             "speedup_wall": scalar["wall_seconds_median"] / hybrid["wall_seconds_median"],
             "speedup_gpu": scalar["gpu_seconds_median"] / hybrid["gpu_seconds_median"],
             "environment": environment_snapshot(),

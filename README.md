@@ -8,7 +8,7 @@ hardware. It does not change the Transformer architecture.
 > activation-aware BC4 model on validated RTX 40- and RTX 50-series GPUs.
 
 [Paper (PDF)](research/paper/Texelator.pdf) ·
-[Qwen3.8-27B model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4) ·
+[Qwen3.8-27B BF16-calibrated model](https://huggingface.co/hp0303/Qwen3.8-27B-Texelator-AWBC4-BF16Cal) ·
 [Latest release](https://github.com/hp0303/Texelator/releases/latest)
 
 > **Early alpha — bug reports are very welcome.** Texelator is still experimental,
@@ -24,7 +24,7 @@ hardware. It does not change the Transformer architecture.
 
 ### Windows 11 (native PowerShell)
 
-Download `texelator-v0.2.0-windows.zip` from the
+Download `texelator-v0.3.0-windows.zip` from the
 [latest release](https://github.com/hp0303/Texelator/releases/latest), extract it,
 open PowerShell in `texelator_windows`, and run:
 
@@ -52,17 +52,17 @@ texelator benchmark qwen3.8:27b
 texelator run qwen3.8:27b
 ```
 
-`benchmark` is required once for each model/GPU pair. It checks K candidates
-`{1,2,3,4,6,8}` for numerical agreement, selects the fastest valid texture-request
-schedule, and saves the result locally. Omit the prompt after `run` to start terminal
-chat. Thinking is off by default; use `/thinking on` and `/thinking off` interactively.
-Texelator imposes no default output-token limit and stops at EOS or the context limit.
+`benchmark` is required once for each model/GPU pair. It correctness-checks and saves
+both the decode lookahead and the 32/128/512-token BF16 prefill tile selection locally.
+Omit the prompt after `run` to start terminal chat. Thinking is off by default; use
+`/thinking on` and `/thinking off` interactively. Texelator imposes no default
+output-token limit and stops at EOS or the context limit.
 
 Texelator automatically uses two execution paths: single-token decode keeps the
-texture-native GEMV selected by `benchmark`, while multi-token prompt prefill decodes
-a bounded BC4 row tile with `tex2Dgather()` and reuses it through a cuBLAS Tensor Core
-GEMM. This avoids rereading every weight independently for every prompt token and does
-not keep a second FP16 copy of the model. Check both paths on a standalone artifact with:
+texture-native GEMV selected by `benchmark`, while BF16 prefill selects among five
+correctness-equivalent CUTLASS Texture IteratorB tiles for the current GPU and shape.
+This avoids a full dense-weight write and does not keep a second 16-bit copy of the
+model. Check both paths on a standalone artifact with:
 
 ```bash
 texelator prefill-benchmark qwen3.8:27b --tokens 512 \
@@ -72,6 +72,17 @@ texelator prefill-benchmark qwen3.8:27b --tokens 512 \
 The command first compares the hybrid result against the legacy scalar texture path,
 then records wall/GPU prefill throughput and speedup. See
 [hybrid prefill](docs/hybrid-prefill.md) for its scope and tuning controls.
+
+An opt-in MLP-only FP4 prefill experiment is also included:
+
+```bash
+texelator run qwen3.8:27b --prefill-mode fp4
+```
+
+FP4 is **not** the default and is not quality-equivalent to BF16. On the RTX 5080
+512-token validation it improved full-model prefill from 1066.1 to 1325.8 tok/s, but
+the final hidden state had cosine 0.872 and relative RMS 0.507 versus BF16. Use it only
+for performance experiments; normal inference uses `--prefill-mode bf16`.
 
 ## What is included
 
@@ -142,10 +153,11 @@ See [QUICKSTART.md](QUICKSTART.md), [local model guidance](docs/local-models.md)
 
 - Native Windows 11, Linux, and WSL2 are supported from source.
 - RTX 4060, RTX 4080 SUPER, and RTX 5080 have been validated.
-- Activations and outputs are FP16; accumulation uses FP32 registers.
+- RTX 5080 pulls the BF16-source/BF16-calibrated Qwen3.8-27B artifact. RTX 40-series
+  currently keeps the earlier FP16 artifact. Both paths accumulate into FP32 registers.
 - Current inference targets batch-one CUDA execution.
-- Multi-token prefill uses a temporary FP16 row-tile workspace; it does not retain a
-  dense FP16 checkpoint.
+- BF16 multi-token prefill fuses texture reconstruction with Tensor Core MMA and does
+  not materialize a dense weight matrix in global memory.
 - GPU-specific hardware reconstruction is measured and protected by a palette hash.
 
 Windows local state defaults to `%LOCALAPPDATA%\Texelator`. Linux/WSL state defaults

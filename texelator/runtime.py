@@ -18,6 +18,10 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 _EXTENSION = None
 PREFILL_THRESHOLD = int(os.environ.get("TEXELATOR_PREFILL_THRESHOLD", "16"))
 PREFILL_TILE_ROWS = int(os.environ.get("TEXELATOR_PREFILL_TILE_ROWS", "1024"))
+FP4_HYBRID_SHAPES = {(5120, 17408), (17408, 5120)}
+_FP4_HYBRID_ENABLED = False
+_FP4_WORKSPACES: dict[tuple[int, int, int, int], dict[str, torch.Tensor]] = {}
+_HANDLE_SHAPES: dict[int, tuple[int, int]] = {}
 
 
 def extension(verbose: bool = False):
@@ -37,16 +41,93 @@ def extension(verbose: bool = False):
                     "the prebuilt Texelator CUDA extension is unavailable and JIT compilation is disabled"
                 )
         _EXTENSION = load(
-            name="texelator_cuda_ext",
+            name="texelator_cuda_ext_v030",
             sources=[
                 str(PACKAGE_ROOT / "cuda" / "extension.cpp"),
                 str(PACKAGE_ROOT / "cuda" / "texelator_cuda.cu"),
+                str(PACKAGE_ROOT / "cuda" / "cutlass_texture_mainloop.cu"),
+                str(PACKAGE_ROOT / "cuda" / "cutlass_texture_t1.cu"),
+                str(PACKAGE_ROOT / "cuda" / "cutlass_texture_t2.cu"),
+                str(PACKAGE_ROOT / "cuda" / "cutlass_texture_t3.cu"),
+                str(PACKAGE_ROOT / "cuda" / "cutlass_texture_smalln.cu"),
             ],
-            extra_cuda_cflags=["-O3", "--use_fast_math", "-lineinfo"],
+            extra_include_paths=[
+                str(PACKAGE_ROOT.parent / "third_party" / "cutlass" / "include"),
+            ],
+            extra_cuda_cflags=[
+                "-O3", "--use_fast_math", "-lineinfo", "-Xptxas=-v",
+            ],
             extra_ldflags=(["cublas.lib"] if sys.platform == "win32" else ["-lcublas"]),
             verbose=verbose,
         )
     return _EXTENSION
+
+
+def set_fp4_hybrid(enabled: bool) -> None:
+    """Enable the opt-in 512-token MLP FP4 prefill path.
+
+    This is deliberately process-local and disabled by default because the
+    measured hidden-state output is not numerically equivalent to BF16.
+    """
+    global _FP4_HYBRID_ENABLED
+    _FP4_HYBRID_ENABLED = bool(enabled)
+
+
+def _scale_storage_size(rows: int, columns: int) -> int:
+    groups = columns // 16
+    return ((rows + 127) // 128 * 128) * ((groups + 3) // 4 * 4)
+
+
+def _fp4_workspace(device: int, tokens: int, m: int, k: int) -> dict[str, torch.Tensor]:
+    key = (device, tokens, m, k)
+    workspace = _FP4_WORKSPACES.get(key)
+    if workspace is None:
+        target = torch.device("cuda", device)
+        workspace = {
+            "activation": torch.empty((tokens, k // 2), dtype=torch.uint8,
+                                      device=target),
+            "activation_scale": torch.empty(_scale_storage_size(tokens, k),
+                                            dtype=torch.uint8, device=target),
+            "weight": torch.empty((m, k // 2), dtype=torch.uint8,
+                                  device=target),
+            "weight_scale": torch.empty(_scale_storage_size(m, k),
+                                        dtype=torch.uint8, device=target),
+        }
+        _FP4_WORKSPACES[key] = workspace
+    return workspace
+
+
+def _fp4_staged_linear(handle: int, x: torch.Tensor, m: int, k: int) -> torch.Tensor:
+    original_shape = list(x.shape)
+    tokens = x.numel() // k
+    flat = x.reshape(tokens, k)
+    workspace = _fp4_workspace(x.device.index or 0, tokens, m, k)
+    ext = extension()
+    ext.quantize_activation_fp4_out(
+        flat, workspace["activation"], workspace["activation_scale"])
+    ext.decode_weight_fp4_out(
+        handle, workspace["weight"], workspace["weight_scale"])
+    output = torch._scaled_mm(
+        workspace["activation"].view(torch.float4_e2m1fn_x2),
+        workspace["weight"].view(torch.float4_e2m1fn_x2).transpose(0, 1),
+        workspace["activation_scale"].view(torch.float8_e4m3fn),
+        workspace["weight_scale"].view(torch.float8_e4m3fn),
+        bias=None, out_dtype=torch.bfloat16)
+    original_shape[-1] = m
+    return output.reshape(original_shape)
+
+
+def _linear_dispatch(handle: int, x: torch.Tensor) -> torch.Tensor:
+    if _FP4_HYBRID_ENABLED and x.dtype == torch.bfloat16:
+        shape = _HANDLE_SHAPES.get(handle)
+        if shape is None:
+            shape = tuple(map(int, extension().handle_info(handle)[:2]))
+            _HANDLE_SHAPES[handle] = shape
+        m, k = shape
+        tokens = x.numel() // k
+        if tokens == 512 and (m, k) in FP4_HYBRID_SHAPES:
+            return _fp4_staged_linear(handle, x, m, k)
+    return extension().linear(handle, x)
 
 
 class TexelatorLinear(nn.Module):
@@ -59,7 +140,7 @@ class TexelatorLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         contiguous = x.contiguous()
-        outputs = [extension().linear(handle, contiguous) for handle in self.handles]
+        outputs = [_linear_dispatch(handle, contiguous) for handle in self.handles]
         output = outputs[0] if len(outputs) == 1 else torch.cat(outputs, dim=-1)
         return output if self.bias is None else output + self.bias
 
@@ -183,7 +264,11 @@ def install_standalone(
 
 
 def free(handles: list[int]) -> None:
+    global _FP4_HYBRID_ENABLED
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     for handle in handles:
         extension().free(handle)
+        _HANDLE_SHAPES.pop(handle, None)
+    _FP4_HYBRID_ENABLED = False
+    _FP4_WORKSPACES.clear()

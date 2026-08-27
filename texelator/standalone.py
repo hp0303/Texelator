@@ -17,12 +17,13 @@ from .runtime import free, install_standalone
 
 
 class CpuOffloadedEmbedding(nn.Module):
-    def __init__(self, embedding: nn.Embedding, output_device: torch.device):
+    def __init__(self, embedding: nn.Embedding, output_device: torch.device, output_dtype: torch.dtype):
         super().__init__()
         if embedding.weight.device.type != "cpu":
             raise RuntimeError("CPU-offloaded embedding must start on CPU")
         self.embedding = embedding
         self.output_device = output_device
+        self.output_dtype = output_dtype
 
     @property
     def weight(self) -> torch.Tensor:
@@ -38,7 +39,7 @@ class CpuOffloadedEmbedding(nn.Module):
             self.embedding.scale_grad_by_freq,
             self.embedding.sparse,
         )
-        return values.to(device=self.output_device, dtype=torch.float16, non_blocking=True)
+        return values.to(device=self.output_device, dtype=self.output_dtype, non_blocking=True)
 
 
 def is_standalone_artifact(path: str | Path) -> bool:
@@ -105,6 +106,11 @@ def load_standalone_qwen38(path: str | Path, lookahead: int = 1):
     if standalone.get("model_family") != "qwen3_5_text":
         raise RuntimeError(f"unsupported standalone model family: {standalone.get('model_family')!r}")
     _verify_hardware(artifact, manifest)
+    runtime_dtype_name = manifest.get("runtime_dtype", "float16")
+    runtime_dtypes = {"float16": torch.float16, "bfloat16": torch.bfloat16}
+    if runtime_dtype_name not in runtime_dtypes:
+        raise RuntimeError(f"unsupported Texelator runtime dtype: {runtime_dtype_name!r}")
+    runtime_dtype = runtime_dtypes[runtime_dtype_name]
     config = AutoConfig.from_pretrained(artifact, local_files_only=True, trust_remote_code=False)
     text_config = config.text_config
     with init_empty_weights():
@@ -127,16 +133,17 @@ def load_standalone_qwen38(path: str | Path, lookahead: int = 1):
         # empty parameters when deriving `model.device` for generation tensors.
         model.register_parameter(
             "_texelator_device_anchor",
-            nn.Parameter(torch.zeros(1, device=device, dtype=torch.float16), requires_grad=False),
+            nn.Parameter(torch.zeros(1, device=device, dtype=runtime_dtype), requires_grad=False),
         )
-        if model.device != device or model.dtype != torch.float16:
+        if model.device != device or model.dtype != runtime_dtype:
             raise RuntimeError(
-                f"failed to expose CUDA FP16 generation device: device={model.device}, dtype={model.dtype}"
+                f"failed to expose CUDA {runtime_dtype_name} generation device: "
+                f"device={model.device}, dtype={model.dtype}"
             )
         embedding = model.model.embed_tokens.to("cpu")
-        model.model.embed_tokens = CpuOffloadedEmbedding(embedding, device)
-        model.model.layers.to(device=device, dtype=torch.float16)
-        model.model.norm.to(device=device, dtype=torch.float16)
+        model.model.embed_tokens = CpuOffloadedEmbedding(embedding, device, runtime_dtype)
+        model.model.layers.to(device=device, dtype=runtime_dtype)
+        model.model.norm.to(device=device, dtype=runtime_dtype)
         if hasattr(model.model, "rotary_emb"):
             model.model.rotary_emb.to(device=device)
         if (artifact / "generation_config.json").is_file():

@@ -121,12 +121,35 @@ def command_package(args) -> None:
 
 def command_benchmark(args) -> None:
     from .tuning import tune_artifact
+    from .autotune import tune_artifact as tune_prefill
 
+    artifact = _resolve_runtime_artifact(args.artifact, auto_pull=False)
     tune_artifact(
-        _resolve_runtime_artifact(args.artifact, auto_pull=False),
+        artifact,
         warmup=args.warmup,
         measured=args.measured,
         runs=args.runs,
+    )
+    manifest = json.loads((artifact / "texelator.json").read_text())
+    if manifest.get("runtime_dtype", "float16") != "bfloat16":
+        print("[texelator] FP16 artifact: BF16 prefill autotuning is not applicable", flush=True)
+        return
+    tokens = [int(value) for value in args.prefill_tokens.split(",") if value.strip()]
+    tune_prefill(
+        artifact, output_path=None, tokens=tokens,
+        warmup=args.prefill_warmup, measured=args.prefill_measured,
+    )
+
+
+def command_prefill_benchmark(args) -> None:
+    from .prefill import benchmark_prefill
+
+    benchmark_prefill(
+        _resolve_runtime_artifact(args.artifact, auto_pull=False),
+        tokens=args.tokens,
+        warmup=args.warmup,
+        runs=args.runs,
+        output=Path(args.output).expanduser().resolve(),
     )
 
 
@@ -165,8 +188,15 @@ def _remaining_context_tokens(model, tokenizer, prompt_tokens: int) -> int:
 
 def _generate(model, tokenizer, messages: list[dict], args) -> str:
     from transformers import TextStreamer
+    from .autotune import apply_profile
+    from .runtime import set_fp4_hybrid
 
     inputs = _prompt_ids(tokenizer, messages, args.raw, args.thinking).to(input_device(model))
+    prefill_profile = getattr(model, "_texelator_prefill_profile", None)
+    model_handles = getattr(model, "_texelator_handles", [])
+    if prefill_profile is not None and model_handles:
+        apply_profile(model_handles, int(inputs.shape[-1]), prefill_profile)
+    set_fp4_hybrid(args.prefill_mode == "fp4")
     streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     generation = {
         "input_ids": inputs,
@@ -198,6 +228,7 @@ def command_run(args) -> None:
     from .runtime import install
     from .standalone import is_standalone_artifact, load_standalone_qwen38
     from .tuning import selected_lookahead
+    from .autotune import selected_profile
 
     handles: list[int] = []
     lookahead: int | None = None
@@ -207,6 +238,10 @@ def command_run(args) -> None:
     else:
         artifact = _resolve_runtime_artifact(args.target, auto_pull=False)
         if is_standalone_artifact(artifact):
+            artifact_manifest = json.loads((artifact / "texelator.json").read_text())
+            runtime_dtype = artifact_manifest.get("runtime_dtype", "float16")
+            if args.prefill_mode == "fp4" and runtime_dtype != "bfloat16":
+                raise RuntimeError("FP4 prefill requires a BF16-runtime Texelator artifact")
             lookahead, profile = selected_lookahead(artifact)
             if profile is None:
                 raise RuntimeError(
@@ -216,6 +251,20 @@ def command_run(args) -> None:
             print(f"[texelator] loading standalone {artifact}", flush=True)
             model, tokenizer, handles = load_standalone_qwen38(artifact, lookahead=lookahead)
             print(f"[texelator] installed standalone AW-BC4 linears with K={lookahead}", flush=True)
+            if runtime_dtype == "bfloat16":
+                prefill_profile, prefill_path = selected_profile(artifact)
+                if prefill_profile is None:
+                    raise RuntimeError(
+                        "this model has no prefill profile for the current GPU; run "
+                        f"`texelator benchmark {args.target}` once before inference"
+                    )
+                model._texelator_prefill_profile = prefill_profile
+                print(f"[texelator] prefill mode={args.prefill_mode}; profile={prefill_path}", flush=True)
+            if args.prefill_mode == "fp4":
+                print(
+                    "[texelator] WARNING: FP4 prefill is experimental and may reduce model quality; "
+                    "BF16 is the production default.", flush=True,
+                )
             return _run_chat(model, tokenizer, handles, args)
         record = _artifact_source(artifact)
         if not Path(record.source).exists():
@@ -224,6 +273,9 @@ def command_run(args) -> None:
             )
         current_palette = ensure_hardware()
         artifact_manifest = json.loads((artifact / "texelator.json").read_text())
+        runtime_dtype = artifact_manifest.get("runtime_dtype", "float16")
+        if args.prefill_mode == "fp4" and runtime_dtype != "bfloat16":
+            raise RuntimeError("FP4 prefill requires a BF16-runtime Texelator artifact")
         from .artifacts import sha256_file
         if artifact_manifest["hardware"]["palette_sha256"] != sha256_file(current_palette):
             raise RuntimeError("artifact palette does not match this GPU; reconvert the model on this machine")
@@ -245,6 +297,14 @@ def command_run(args) -> None:
             lookahead=lookahead,
             fp16_prefill=args.fp16_prefill,
         )
+        if artifact_manifest.get("runtime_dtype", "float16") == "bfloat16":
+            prefill_profile, prefill_path = selected_profile(artifact)
+            if prefill_profile is None:
+                raise RuntimeError(
+                    "this model has no prefill profile for the current GPU; run "
+                    f"`texelator benchmark {args.target}` once before inference"
+                )
+            model._texelator_prefill_profile = prefill_profile
         print(f"[texelator] installed BC4 linears with K={lookahead}", flush=True)
 
     return _run_chat(model, tokenizer, handles, args)
@@ -362,14 +422,32 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--warmup", type=int, default=10)
     benchmark.add_argument("--measured", type=int, default=50)
     benchmark.add_argument("--runs", type=int, default=3)
+    benchmark.add_argument("--prefill-tokens", default="32,128,512")
+    benchmark.add_argument("--prefill-warmup", type=int, default=3)
+    benchmark.add_argument("--prefill-measured", type=int, default=15)
     benchmark.set_defaults(function=command_benchmark)
 
-    run = commands.add_parser("run", help="run a converted artifact or an FP16 source model")
+    prefill = commands.add_parser(
+        "prefill-benchmark",
+        help="compare scalar texture prefill with fused BC4/Tensor Core prefill",
+    )
+    prefill.add_argument("artifact")
+    prefill.add_argument("--tokens", type=int, default=512)
+    prefill.add_argument("--warmup", type=int, default=1)
+    prefill.add_argument("--runs", type=int, default=3)
+    prefill.add_argument("--output", default="texelator-prefill-benchmark.json")
+    prefill.set_defaults(function=command_prefill_benchmark)
+
+    run = commands.add_parser("run", help="run a converted artifact or a dense source model")
     run.add_argument("target")
     run.add_argument("prompt", nargs="?")
     run.add_argument("--backend", choices=("texelator", "fp16"), default="texelator")
     run.add_argument("--device-map", default="cuda")
     run.add_argument("--fp16-prefill", action="store_true", help="retain dense linears for prefill (uses more VRAM)")
+    run.add_argument(
+        "--prefill-mode", choices=("bf16", "fp4"), default="bf16",
+        help="BF16 is quality-preserving; FP4 is an experimental 512-token MLP speed path",
+    )
     run.add_argument("--system")
     run.add_argument(
         "--max-new-tokens", type=int, default=None,

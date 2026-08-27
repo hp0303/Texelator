@@ -6,6 +6,12 @@ def test_commands_are_separate():
     assert parser.parse_args(["model", "register", "/tmp/model", "--name", "local"]).model_command == "register"
     assert parser.parse_args(["ptq", "local"]).command == "ptq"
     assert parser.parse_args(["benchmark", "/tmp/artifact"]).command == "benchmark"
+    prefill = parser.parse_args([
+        "prefill-benchmark", "/tmp/artifact", "--tokens", "1024", "--runs", "5",
+    ])
+    assert prefill.command == "prefill-benchmark"
+    assert prefill.tokens == 1024
+    assert prefill.runs == 5
     assert parser.parse_args(["run", "/tmp/artifact"]).command == "run"
     assert parser.parse_args(["pull", "qwen3.8:27b"]).command == "pull"
     assert parser.parse_args(["download", "qwen3.8:27b"]).command == "download"

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Added portable BF16 prefill autotuning across five CUTLASS Texture IteratorB tile
+  shapes while preserving the existing texture GEMV decode path.
+- Added an explicitly experimental MLP-only FP4 prefill mode for 512-token speed
+  studies. It is disabled by default because it is not quality-equivalent to BF16.
+- Added BF16-source/BF16-calibrated standalone artifact selection for RTX 5080.
+- Added `texelator prefill-benchmark` with scalar-vs-hybrid correctness, wall timing,
+  CUDA-event timing, throughput, environment capture, and JSON output.
+- Made the one-time `benchmark` command save both decode and prefill selections.
+
 ## 0.2.0
 
 - Added a native Windows 11 installer and command wrapper, validated on RTX 5080.

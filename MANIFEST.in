@@ -1,6 +1,8 @@
 include README.md QUICKSTART.md CHANGELOG.md PUBLISH.md LICENSE CITATION.cff
 include setup.ps1 texelator.cmd WINDOWS_VALIDATION.md
 recursive-include texelator/cuda *.cu *.cpp
+recursive-include third_party/cutlass/include *.h *.hpp
+include third_party/cutlass/LICENSE.txt
 recursive-include docs *.md
 recursive-include research/paper *.pdf
 recursive-include research/results/paper *.csv *.json *.md *.png

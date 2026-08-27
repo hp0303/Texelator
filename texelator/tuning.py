@@ -30,6 +30,11 @@ def tune_artifact(
     if not torch.cuda.is_available():
         raise RuntimeError("tuning requires a visible CUDA GPU")
     manifest = json.loads((artifact / "texelator.json").read_text())
+    runtime_dtype_name = manifest.get("runtime_dtype", "float16")
+    runtime_dtypes = {"float16": torch.float16, "bfloat16": torch.bfloat16}
+    if runtime_dtype_name not in runtime_dtypes:
+        raise RuntimeError(f"unsupported Texelator runtime dtype: {runtime_dtype_name!r}")
+    runtime_dtype = runtime_dtypes[runtime_dtype_name]
     current_palette = ensure_hardware()
     expected_palette = manifest.get("hardware", {}).get("palette_sha256")
     if not expected_palette or sha256_file(current_palette) != expected_palette:
@@ -50,7 +55,7 @@ def tune_artifact(
             group = pack_entry_handles(weights, entry, lookahead=1)
             handle_groups.append(group)
             handles.extend(group)
-            inputs.append(torch.randn((1, int(entry["K"])), device="cuda", dtype=torch.float16,
+            inputs.append(torch.randn((1, int(entry["K"])), device="cuda", dtype=runtime_dtype,
                                       generator=generator))
 
         def evaluate(group: list[int], value: torch.Tensor) -> torch.Tensor:
@@ -110,6 +115,7 @@ def tune_artifact(
             "weights_metadata_sha256": sha256_file(metadata_path),
             "palette_sha256": expected_palette,
             "artifact": str(artifact.resolve()),
+            "runtime_dtype": runtime_dtype_name,
             "linears": len(entries),
             "warmup_sweeps": warmup,
             "measured_sweeps": measured,
